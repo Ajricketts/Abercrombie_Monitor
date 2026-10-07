@@ -1,0 +1,44 @@
+name: Abercrombie Stock Monitor
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run stock monitor
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          xvfb-run -a python check_stock.py
+
+      - name: Save stock state
+        run: |
+          git config user.name "abercrombie-stock-bot"
+          git config user.email "actions@github.com"
+
+          git add state.json
+
+          if ! git diff --cached --quiet; then
+            git commit -m "Update stock state"
+            git push
+          fi
