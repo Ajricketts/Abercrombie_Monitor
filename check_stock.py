@@ -4,8 +4,7 @@ from selenium.webdriver.common.by import By
 
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-import time
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 import json
 import os
@@ -113,20 +112,28 @@ def check_product(driver, wait, product):
 
 	available_variants = []
 
+	print(f"Loading product: {product['name']}", flush=True)
+	print(f"URL: {product['url']}", flush=True)
+
 	driver.get(product["url"])
+	print("Page load returned", flush=True)
+
 	dismiss_cookie_popup(driver)
 
-	print(driver.title)
-	print(driver.current_url)
-	print(driver.page_source[:1000])
+	print(f"Title: {driver.title}", flush=True)
+	print(f"Current URL: {driver.current_url}", flush=True)
 
-	colour_wrapper = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "swatch-group__tiles")))
+	colour_wrapper = wait.until(
+		EC.presence_of_element_located((By.CLASS_NAME, "swatch-group__tiles"))
+	)
+	print("Found colour swatches", flush=True)
+
 	colour_elements = colour_wrapper.find_elements(By.CLASS_NAME, "ds-swatch-tile")
+
 	for parent in colour_elements:
 		img_element = parent.find_element(By.XPATH, ".//img")
 		colour = img_element.get_attribute("alt")
 		colour_selector = parent.find_element(By.XPATH, ".//input")
-		print(f"Colour = {colour}")
 
 		if product["wanted_colours"] == "non-striped":
 			if "stripe" in colour.lower():
@@ -135,26 +142,30 @@ def check_product(driver, wait, product):
 			if colour.lower() not in product["wanted_colours"]:
 				continue
 
-		colour_selector.click()
+		print(f"Checking colour: {colour}", flush=True)
 
+		colour_selector.click()
 		wait.until(lambda d: colour_selector.is_selected())
 
 		l_input = wait.until(EC.presence_of_element_located((By.ID, "pdp_radio_size_primary_L")))
-		
-		if is_unavailable(l_input):
-			print("Large is unavailable")
-		else:
-			l_input.click()
-			t_input = wait.until(EC.presence_of_element_located((By.ID, "pdp_radio_size_secondary_Tall")))
 
-			if not is_unavailable(t_input):
-				available_variants.append({
-					"product": product["name"],
-					"colour": colour,
-					"size": "L",
-					"length": "Tall",
-					"url": product["url"]
-				})
+		if is_unavailable(l_input):
+			print(f"{colour}: Large unavailable", flush=True)
+			continue
+
+		t_input = wait.until(EC.presence_of_element_located((By.ID, "pdp_radio_size_secondary_Tall")))
+
+		if is_unavailable(t_input):
+			print(f"{colour}: L Tall unavailable", flush=True)
+		else:
+			print(f"{colour}: L Tall AVAILABLE", flush=True)
+			available_variants.append({
+				"product": product["name"],
+				"colour": colour,
+				"size": "L",
+				"length": "Tall",
+				"url": product["url"]
+			})
 
 	return available_variants
 
@@ -163,27 +174,50 @@ def main():
 	all_available = []
 
 	for product in products:
-		# Set up headless Chrome (runs in the background)
 		chrome_options = Options()
-		# chrome_options.add_argument("--headless=new")
 
-		# Initialize the driver
-		driver = webdriver.Chrome(options=chrome_options)
-		wait = WebDriverWait(driver, 10)
+		# GitHub Actions / Linux runner stability settings.
+		# Do not enable headless mode because Abercrombie blocked it locally.
+		chrome_options.add_argument("--no-sandbox")
+		chrome_options.add_argument("--disable-dev-shm-usage")
+
+		print(f"\nStarting browser for: {product['name']}", flush=True)
+
+		driver = None
 		try:
+			print("Creating Chrome driver...", flush=True)
+			driver = webdriver.Chrome(options=chrome_options)
+			driver.set_page_load_timeout(30)
+			print("Chrome driver created", flush=True)
+
+			wait = WebDriverWait(driver, 10)
 			all_available.extend(check_product(driver, wait, product))
+
+		except TimeoutException as e:
+			print(f"Timed out while checking {product['name']}: {e}", flush=True)
+			raise
+
+		except WebDriverException as e:
+			print(f"Selenium/Chrome error while checking {product['name']}: {e}", flush=True)
+			raise
+			
 		finally:
-			driver.quit()
+			if driver is not None:
+				print(f"Closing browser for: {product['name']}", flush=True)
+				driver.quit()
 
 	current_state = {variant_key(variant): variant for variant in all_available}
 	previous_state = load_state()
 
 	new_restocked = [variant for key, variant in current_state.items() if key not in previous_state]
 
+	print(f"Available variants found: {len(all_available)}", flush=True)
+	print(f"New restocks found: {len(new_restocked)}", flush=True)
+
 	send_email(new_restocked)
 	save_state(current_state)
 
-	print(all_available)
-		
+	print(all_available, flush=True)
+
 
 main()
