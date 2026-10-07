@@ -153,6 +153,12 @@ def check_product(driver, wait, product):
 			print(f"{colour}: Large unavailable", flush=True)
 			continue
 
+		# Explicitly select Large so Tall availability is calculated for L
+		l_input.click()
+
+		wait.until(lambda d: d.find_element(By.ID, "pdp_radio_size_primary_L").is_selected())
+
+		# Re-find Tall after selecting Large in case the DOM was updated
 		t_input = wait.until(EC.presence_of_element_located((By.ID, "pdp_radio_size_secondary_Tall")))
 
 		if is_unavailable(t_input):
@@ -200,7 +206,7 @@ def main():
 		except WebDriverException as e:
 			print(f"Selenium/Chrome error while checking {product['name']}: {e}", flush=True)
 			raise
-			
+
 		finally:
 			if driver is not None:
 				print(f"Closing browser for: {product['name']}", flush=True)
